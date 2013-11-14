@@ -9,11 +9,14 @@
 # http://www.science.uva.nl/research/wzi/scm/strainfield.m
 # used in, for example, Rahmani et al. Sci. Rep. 2, 1064 (2013).
 
+# Three output files are produced:
+# epsilon.dat => 
+
 require 'matrix'
 
 class Ion
 
-	attr_reader :r, :number
+	attr_reader :r, :number, :epsilon
 
 	@@ion_number = 0
 
@@ -23,6 +26,7 @@ class Ion
     @r = r
     @neighbour_vectors = []
     @neighbours = []
+    @epsilon = nil
   end
 
   def find_neighbours( ions, cell, cutoff )
@@ -35,21 +39,37 @@ class Ion
   end
 
   def strain_vector( reference_vectors, cell )
-  	e = Matrix[ *strain_epsilon( reference_vectors, cell ) ].eigen
+  	calculate_strain_epsilon( reference_vectors, cell ) if @epsilon.nil?
+  	e = Matrix[ *@epsilon ].eigen
   	eigenvectors = e.v.column_vectors
   	eigenvalues = (0..2).collect{ |i| e.d[i,i] }
   	max_eigenvector = eigenvectors.zip( eigenvalues ).max_by{ |vector, value| value }
-  	# max_eigenvector[1] = max_eigenvector[1] > 1e-16 ? Math.log10( max_eigenvector[1] ) : 0.0
   	( max_eigenvector[1] * max_eigenvector[0] ).to_a
   end
 
-  def strain_epsilon( reference_vectors, cell )
+  def calculate_strain_epsilon( reference_vectors, cell )
   	zero_strain_vectors = @neighbour_vectors.map{ |v| closest_reference_vector( v, reference_vectors, cell ) }
   	x = falk_x( zero_strain_vectors, @neighbour_vectors )
   	y = falk_y( zero_strain_vectors )
   	deformation_matrix = Matrix[ *affine_deformation( x, y ) ]
   	symmetric_component = ( 0.5 * ( deformation_matrix + deformation_matrix.transpose ) ).to_a
-  	return symmetric_component
+  	@epsilon = symmetric_component
+  end
+
+  def d_squared( reference_vectors, cell )
+  	calculate_strain_epsilon( reference_vectors, cell ) if @epsilon.nil?
+  	zero_strain_vectors = @neighbour_vectors.map{ |v| closest_reference_vector( v, reference_vectors, cell ) }
+  	zero_strain_vectors.zip( @neighbour_vectors ).inject(0.0) do |sum_n, (v1,v2)| # loop over index n
+  		sum_n + v1.each_with_index.inject(0.0) do |sum_i, (r_i, i)| 								# loop over index i
+  			sum_i + ( r_i - v2.each_with_index.inject(0.0) do |sum_j, (r_j, j)| 			# loop over index j
+  				sum_j + ( @epsilon[i][j] + delta(i,j) ) * r_j 
+	  		end )**2
+			end
+  	end
+  end
+
+  def delta(i,j)
+  	i == j ? 1.0 : 0.0
   end
 
   def falk_x( zero_strain_vectors, neighbour_vectors )
@@ -85,9 +105,7 @@ class Ion
   end
 
   def closest_reference_vector( neighbour_vector, reference_vectors, cell ) 
-  	reference_vectors.min_by do |vector|
-  		Vector[ *cell.dr( vector, neighbour_vector ) ].magnitude
-  	end
+  	reference_vectors.min_by { |vector| Vector[ *cell.dr( vector, neighbour_vector ) ].magnitude }
   end
 
 end
@@ -276,13 +294,21 @@ def output_format( n )
 	return Array.new( n, '%.3e' ).join(' ')
 end
 
-epsilon_out = File.new( 'epsilon.dat', 'w' )
-vector_out  = File.new( 'eigenvector.dat', 'w' )
-epsilon_out.puts "\# n  eps_xx     eps_xy     eps_xz     eps_yx     eps_yy     eps_yz     eps_zx     eps_zy     eps_zz"
-vector_out.puts  "\# n  x          y          z          dx         dy         dz"
+epsilon_out   = File.new( 'epsilon.dat', 'w' )
+vector_out    = File.new( 'eigenvector.dat', 'w' )
+d_squared_out = File.new( 'dsquared.dat', 'w' )
+
+epsilon_out.puts   "\# n  eps_xx     eps_xy     eps_xz     eps_yx     eps_yy     eps_yz     eps_zx     eps_zy     eps_zz"
+vector_out.puts    "\# n  x          y          z          dx         dy         dz"
+d_squared_out.puts "\# n  D^2"
+
 ions.each_with_index do |ion,i| 
 	ion.find_neighbours( ions, cell, options[:cutoff] )
-	epsilon_out.puts "  #{i+1}  #{output_format(9) % ion.strain_epsilon( neighbour_vectors, cell ).flatten}"
+	ion.calculate_strain_epsilon( neighbour_vectors, cell )
 	strain = ion.strain_vector( neighbour_vectors, cell ).map{ |r|  r * options[:vector_scaling] }
-	vector_out.puts " #{output_format(3) % ion.r}  #{output_format(3) % strain }"
+	d2 = ion.d_squared( neighbour_vectors, cell )
+
+	epsilon_out.puts   "  #{i+1}  #{output_format(9) % ion.epsilon.flatten}"
+	vector_out.puts    "  #{output_format(3) % ion.r}  #{output_format(3) % strain }"
+	d_squared_out.puts "  #{i+1}  #{output_format(1) % d2}}"
 end
