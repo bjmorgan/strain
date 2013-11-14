@@ -3,7 +3,7 @@ Date: November 13, 2013
 
 # strain README
 
-This program clculates local strain fields from VASP / QUAIM ionic configurations.
+This program calculates local strain fields from VASP / QUAIM ionic configurations.
 
 This routine is based on the algorithm proposed by [M. L. Falk and J. S. Langer] and borrows heavily from the [MATLAB implementation] by P. Schall and D. Bonner; used in, for example, [Rahmani et al. Sci. Rep. 2, 1064 (2013)].
 
